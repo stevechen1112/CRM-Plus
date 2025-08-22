@@ -1,0 +1,378 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model for authentication and user management
+model User {
+  id          String    @id @default(uuid())
+  email       String    @unique
+  name        String
+  password    String
+  role        UserRole  @default(STAFF)
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  assignedTasks Task[]
+  interactions  Interaction[]
+  auditLogs     AuditLog[]
+  importJobs    ImportJob[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+// Customer model with phone number as primary key (Taiwan format)
+model Customer {
+  phone             String   @id // Primary key - Taiwan phone format (09xxxxxxxx)
+  name              String
+  email             String?
+  lineId            String?  @map("line_id")
+  facebookUrl       String?  @map("facebook_url")
+  source            String?
+  tags              String[] @default([])
+  region            String?
+  preferredProducts String[] @default([]) @map("preferred_products")
+  paymentMethods    String[] @default([]) @map("payment_methods")
+  marketingConsent  Boolean  @default(false) @map("marketing_consent")
+  notes             String?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // Computed fields (will be calculated in service layer)
+  // totalSpent, orderCount, lastOrderDate, rfmSegment
+
+  // Relations
+  orders       Order[]
+  interactions Interaction[]
+  tasks        Task[]
+  rfmAnalysis  RfmAnalysis[]
+
+  // Indexes for performance
+  @@index([name])
+  @@index([source])
+  @@index([region])
+  @@index([tags])
+  @@index([createdAt])
+  @@map("customers")
+}
+
+// Order model
+model Order {
+  id              String        @id @default(uuid())
+  orderNo         String        @unique @map("order_no")
+  customerPhone   String        @map("customer_phone")
+  totalAmount     Decimal       @map("total_amount")
+  paymentStatus   PaymentStatus @default(PENDING) @map("payment_status")
+  paymentMethod   String?       @map("payment_method")
+  orderStatus     OrderStatus   @default(DRAFT) @map("order_status")
+  deliveryMethod  String?       @map("delivery_method")
+  deliveryAddress String?       @map("delivery_address")
+  notes           String?
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  customer Customer    @relation(fields: [customerPhone], references: [phone], onDelete: Cascade)
+  items    OrderItem[]
+
+  @@index([customerPhone])
+  @@index([orderStatus])
+  @@index([paymentStatus])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+// Order items
+model OrderItem {
+  id          String  @id @default(uuid())
+  orderId     String  @map("order_id")
+  productName String  @map("product_name")
+  quantity    Int
+  unitPrice   Decimal @map("unit_price")
+  totalPrice  Decimal @map("total_price")
+  notes       String?
+
+  // Relations
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+// Interaction model for customer communications
+model Interaction {
+  id            String             @id @default(uuid())
+  customerPhone String             @map("customer_phone")
+  channel       InteractionChannel
+  summary       String
+  notes         String?
+  attachments   String[]           @default([])
+  userId        String             @map("user_id")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  // Relations
+  customer Customer @relation(fields: [customerPhone], references: [phone], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([customerPhone])
+  @@index([userId])
+  @@index([channel])
+  @@index([createdAt])
+  @@map("interactions")
+}
+
+// Task model for follow-ups and automation
+model Task {
+  id               String       @id @default(uuid())
+  customerPhone    String       @map("customer_phone")
+  title            String
+  description      String?
+  type             TaskType
+  priority         TaskPriority @default(MEDIUM)
+  status           TaskStatus   @default(PENDING)
+  assigneeId       String       @map("assignee_id")
+  dueAt            DateTime     @map("due_at")
+  completedAt      DateTime?    @map("completed_at")
+  automationRuleId String?      @map("automation_rule_id")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  customer       Customer        @relation(fields: [customerPhone], references: [phone], onDelete: Cascade)
+  assignee       User            @relation(fields: [assigneeId], references: [id])
+  automationRule AutomationRule? @relation(fields: [automationRuleId], references: [id])
+
+  @@index([customerPhone])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([priority])
+  @@index([dueAt])
+  @@index([type])
+  @@map("tasks")
+}
+
+// Automation rules for task creation
+model AutomationRule {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  trigger     String // JSON string containing trigger configuration
+  conditions  String // JSON string containing conditions
+  action      String // JSON string containing action configuration
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tasks Task[]
+
+  @@map("automation_rules")
+}
+
+// Audit log for tracking all operations
+model AuditLog {
+  id        String    @id @default(uuid())
+  requestId String    @map("request_id")
+  userId    String    @map("user_id")
+  userRole  UserRole  @map("user_role")
+  userIp    String    @map("user_ip")
+  action    String
+  entity    String
+  entityId  String    @map("entity_id")
+  changes   Json? // JSON object containing before/after changes
+  status    LogStatus
+  latencyMs Int       @map("latency_ms")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([userRole])
+  @@index([action])
+  @@index([entity])
+  @@index([entityId])
+  @@index([createdAt])
+  @@index([requestId])
+  @@map("audit_logs")
+}
+
+// Import job tracking
+model ImportJob {
+  id            String       @id @default(uuid())
+  userId        String       @map("user_id")
+  type          ImportType
+  fileName      String       @map("file_name")
+  totalRows     Int          @map("total_rows")
+  processedRows Int          @default(0) @map("processed_rows")
+  successRows   Int          @default(0) @map("success_rows")
+  errorRows     Int          @default(0) @map("error_rows")
+  status        ImportStatus @default(PENDING)
+  errors        Json? // JSON array of ImportError objects
+  createdAt     DateTime     @default(now()) @map("created_at")
+  completedAt   DateTime?    @map("completed_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@map("import_jobs")
+}
+
+// RFM Analysis results (computed periodically)
+model RfmAnalysis {
+  id            String     @id @default(uuid())
+  customerPhone String     @map("customer_phone")
+  recency       Int // days since last order
+  frequency     Int // total number of orders
+  monetary      Decimal // total amount spent
+  rScore        Int        @map("r_score") // 1-5
+  fScore        Int        @map("f_score") // 1-5
+  mScore        Int        @map("m_score") // 1-5
+  rfmScore      String     @map("rfm_score") // e.g., "555"
+  segment       RfmSegment
+  calculatedAt  DateTime   @default(now()) @map("calculated_at")
+
+  // Relations
+  customer Customer @relation(fields: [customerPhone], references: [phone], onDelete: Cascade)
+
+  @@unique([customerPhone, calculatedAt])
+  @@index([customerPhone])
+  @@index([segment])
+  @@index([calculatedAt])
+  @@map("rfm_analysis")
+}
+
+// Customer merge history for audit trail
+model CustomerMerge {
+  id             String   @id @default(uuid())
+  primaryPhone   String   @map("primary_phone")
+  duplicatePhone String   @map("duplicate_phone")
+  mergedData     Json     @map("merged_data") // JSON object containing merged customer data
+  mergedBy       String   @map("merged_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([primaryPhone])
+  @@index([duplicatePhone])
+  @@index([mergedBy])
+  @@index([createdAt])
+  @@map("customer_merges")
+}
+
+// Refresh token for JWT authentication
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String   @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// Enums
+enum UserRole {
+  ADMIN
+  MANAGER
+  STAFF
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  PARTIAL
+}
+
+enum OrderStatus {
+  DRAFT
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum InteractionChannel {
+  PHONE
+  EMAIL
+  LINE
+  FACEBOOK
+  IN_PERSON
+  OTHER
+}
+
+enum TaskType {
+  FOLLOW_UP
+  CARE_CALL
+  REPURCHASE
+  BIRTHDAY
+  PAYMENT_REMINDER
+  OTHER
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum LogStatus {
+  SUCCESS
+  ERROR
+}
+
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ImportType {
+  CUSTOMERS
+  ORDERS
+}
+
+enum RfmSegment {
+  CHAMPIONS
+  LOYAL_CUSTOMERS
+  POTENTIAL_LOYALISTS
+  NEW_CUSTOMERS
+  PROMISING
+  NEED_ATTENTION
+  ABOUT_TO_SLEEP
+  AT_RISK
+  CANNOT_LOSE_THEM
+  HIBERNATING
+}

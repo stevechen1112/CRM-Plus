@@ -1,0 +1,203 @@
+# Dependencies
+node_modules/
+*/node_modules/
+.pnp
+.pnp.js
+
+# Production builds
+apps/frontend/dist/
+apps/backend/dist/
+packages/*/dist/
+build/
+dist/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Dependency directories
+jspm_packages/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# Next.js build output
+.next
+
+# Nuxt.js build / generate output
+.nuxt
+
+# Vite build outputs
+dist
+dist-ssr
+*.local
+
+# Rollup.js default build output
+dist/
+
+# Serverless directories
+.serverless/
+
+# FuseBox cache
+.fusebox/
+
+# DynamoDB Local files
+.dynamodb/
+
+# TernJS port file
+.tern-port
+
+# Stores VSCode versions used for testing VSCode extensions
+.vscode-test
+
+# Temporary folders
+tmp/
+temp/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+prisma/migrations/*
+!prisma/migrations/.gitkeep
+
+# Docker
+.dockerignore
+
+# Testing
+coverage/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Local configuration
+.env.staging
+.env.production
+
+# Generated files
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+
+# Personal files (desktop environment)
+/../../.CFUserTextEncoding
+/../../.DS_Store
+/../../.anydesk/
+/../../.bash_history
+/../../.boto
+/../../.cache/
+/../../.claude.json
+/../../.claude.json.backup
+/../../.claude/
+/../../.codeium/
+/../../.config/
+/../../.cups/
+/../../.cursor/
+/../../.docker/
+/../../.dropbox/
+/../../.gitconfig
+/../../.gsutil/
+/../../.idlerc/
+/../../.lesshst
+/../../.m2/
+/../../.matplotlib/
+/../../.npm/
+/../../.nvm/
+/../../.ollama/
+/../../.pyenv/
+/../../.python_history
+/../../.railway/
+/../../.redhat/
+/../../.ssh/
+/../../.viminfo
+/../../.vscode/
+/../../.wdm/
+/../../.windsurf/
+/../../.zcompdump
+/../../.zprofile
+/../../.zsh_history
+/../../.zsh_sessions/
+/../../.zshrc
+/../../.zshrc.backup
+/../../Applications/
+../.DS_Store
+../.localized
+../AI專案/
+../AI講座/
+../AI講座拷貝/
+../*
+
+# Test files
+test-*.js
+detect-*.js
+*-test.js
+frontend-*.js
+quick-*.js
+*.sh
+
+# Temporary files (keep important reports)
+REFACTOR_PLAN.md

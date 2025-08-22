@@ -1,0 +1,199 @@
+name: Test Coverage
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  coverage:
+    name: Generate Test Coverage
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: crm_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        working-directory: ./apps/backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: ./apps/frontend
+        run: npm ci
+
+      - name: Setup backend environment
+        working-directory: ./apps/backend
+        run: |
+          cp .env.example .env
+          echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crm_test" >> .env
+          echo "REDIS_URL=redis://localhost:6379" >> .env
+
+      - name: Setup database
+        working-directory: ./apps/backend
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Run backend tests with coverage
+        working-directory: ./apps/backend
+        run: npm run test:coverage
+
+      - name: Run frontend tests with coverage
+        working-directory: ./apps/frontend
+        run: npm run test:coverage
+
+      - name: Upload backend coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./apps/backend/coverage/lcov.info
+          flags: backend
+          name: backend-coverage
+          fail_ci_if_error: false
+
+      - name: Upload frontend coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./apps/frontend/coverage/lcov.info
+          flags: frontend
+          name: frontend-coverage
+          fail_ci_if_error: false
+
+      - name: Generate coverage summary
+        run: |
+          echo "# 測試覆蓋率報告" > coverage-report.md
+          echo "" >> coverage-report.md
+          
+          # Backend coverage summary
+          if [ -f "./apps/backend/coverage/coverage-summary.json" ]; then
+            echo "## Backend Coverage" >> coverage-report.md
+            echo "\`\`\`" >> coverage-report.md
+            node -e "
+              const coverage = require('./apps/backend/coverage/coverage-summary.json').total;
+              console.log('Lines: ' + coverage.lines.pct + '%');
+              console.log('Functions: ' + coverage.functions.pct + '%');
+              console.log('Branches: ' + coverage.branches.pct + '%');
+              console.log('Statements: ' + coverage.statements.pct + '%');
+            " >> coverage-report.md
+            echo "\`\`\`" >> coverage-report.md
+            echo "" >> coverage-report.md
+          fi
+          
+          # Frontend coverage summary
+          if [ -f "./apps/frontend/coverage/coverage-summary.json" ]; then
+            echo "## Frontend Coverage" >> coverage-report.md
+            echo "\`\`\`" >> coverage-report.md
+            node -e "
+              const coverage = require('./apps/frontend/coverage/coverage-summary.json').total;
+              console.log('Lines: ' + coverage.lines.pct + '%');
+              console.log('Functions: ' + coverage.functions.pct + '%');
+              console.log('Branches: ' + coverage.branches.pct + '%');
+              console.log('Statements: ' + coverage.statements.pct + '%');
+            " >> coverage-report.md
+            echo "\`\`\`" >> coverage-report.md
+          fi
+
+      - name: Comment coverage on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            if (fs.existsSync('coverage-report.md')) {
+              const coverageReport = fs.readFileSync('coverage-report.md', 'utf8');
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: coverageReport
+              });
+            }
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            ./apps/backend/coverage/
+            ./apps/frontend/coverage/
+            ./coverage-report.md
+          retention-days: 30
+
+      - name: Check coverage thresholds
+        run: |
+          # Backend coverage check
+          if [ -f "./apps/backend/coverage/coverage-summary.json" ]; then
+            node -e "
+              const coverage = require('./apps/backend/coverage/coverage-summary.json').total;
+              const threshold = 80;
+              
+              console.log('Backend Coverage:');
+              console.log('Lines: ' + coverage.lines.pct + '%');
+              console.log('Functions: ' + coverage.functions.pct + '%');
+              console.log('Branches: ' + coverage.branches.pct + '%');
+              console.log('Statements: ' + coverage.statements.pct + '%');
+              
+              if (coverage.lines.pct < threshold || 
+                  coverage.functions.pct < threshold || 
+                  coverage.branches.pct < threshold || 
+                  coverage.statements.pct < threshold) {
+                console.error('Backend coverage below threshold of ' + threshold + '%');
+                process.exit(1);
+              }
+            "
+          fi
+          
+          # Frontend coverage check
+          if [ -f "./apps/frontend/coverage/coverage-summary.json" ]; then
+            node -e "
+              const coverage = require('./apps/frontend/coverage/coverage-summary.json').total;
+              const threshold = 80;
+              
+              console.log('Frontend Coverage:');
+              console.log('Lines: ' + coverage.lines.pct + '%');
+              console.log('Functions: ' + coverage.functions.pct + '%');
+              console.log('Branches: ' + coverage.branches.pct + '%');
+              console.log('Statements: ' + coverage.statements.pct + '%');
+              
+              if (coverage.lines.pct < threshold || 
+                  coverage.functions.pct < threshold || 
+                  coverage.branches.pct < threshold || 
+                  coverage.statements.pct < threshold) {
+                console.error('Frontend coverage below threshold of ' + threshold + '%');
+                process.exit(1);
+              }
+            "
+          fi

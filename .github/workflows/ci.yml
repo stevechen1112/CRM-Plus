@@ -1,0 +1,356 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: crm_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    defaults:
+      run:
+        working-directory: ./apps/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: './apps/backend/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup environment
+        run: |
+          cp .env.example .env
+          echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crm_test" >> .env
+          echo "REDIS_URL=redis://localhost:6379" >> .env
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run database migrations
+        run: npx prisma migrate deploy
+
+      - name: Lint code
+        run: npm run lint
+
+      - name: Type check
+        run: npm run type-check
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run API tests
+        run: npm run test:e2e
+
+      - name: Build application
+        run: npm run build
+
+      - name: Validate Prisma schema
+        run: npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma
+
+      - name: Upload test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: ./apps/backend/coverage/
+          retention-days: 30
+
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./apps/frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: './apps/frontend/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint code
+        run: npm run lint
+
+      - name: Type check
+        run: npm run type-check
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build application
+        run: npm run build
+
+      - name: Upload test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: ./apps/frontend/coverage/
+          retention-days: 30
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: crm_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        working-directory: ./apps/backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: ./apps/frontend
+        run: npm ci
+
+      - name: Setup backend environment
+        working-directory: ./apps/backend
+        run: |
+          cp .env.example .env
+          echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crm_test" >> .env
+          echo "REDIS_URL=redis://localhost:6379" >> .env
+
+      - name: Setup database
+        working-directory: ./apps/backend
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+          npx prisma db seed
+
+      - name: Build backend
+        working-directory: ./apps/backend
+        run: npm run build
+
+      - name: Build frontend
+        working-directory: ./apps/frontend
+        run: npm run build
+
+      - name: Install Playwright browsers
+        working-directory: ./apps/frontend
+        run: npx playwright install --with-deps
+
+      - name: Start backend server
+        working-directory: ./apps/backend
+        run: |
+          npm start &
+          echo $! > backend.pid
+          # Wait for server to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:8080/health; do sleep 2; done'
+
+      - name: Start frontend server
+        working-directory: ./apps/frontend
+        run: |
+          npm run preview &
+          echo $! > frontend.pid
+          # Wait for server to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+
+      - name: Run E2E tests
+        working-directory: ./apps/frontend
+        run: npm run test:e2e
+
+      - name: Upload E2E test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results
+          path: ./apps/frontend/test-results/
+          retention-days: 30
+
+      - name: Upload E2E test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-report
+          path: ./apps/frontend/playwright-report/
+          retention-days: 30
+
+      - name: Stop servers
+        if: always()
+        run: |
+          if [ -f ./apps/backend/backend.pid ]; then
+            kill $(cat ./apps/backend/backend.pid) || true
+          fi
+          if [ -f ./apps/frontend/frontend.pid ]; then
+            kill $(cat ./apps/frontend/frontend.pid) || true
+          fi
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Audit backend dependencies
+        working-directory: ./apps/backend
+        run: npm audit --audit-level moderate
+
+      - name: Audit frontend dependencies
+        working-directory: ./apps/frontend
+        run: npm audit --audit-level moderate
+
+  build-check:
+    name: Build Check
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install and build backend
+        working-directory: ./apps/backend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install and build frontend
+        working-directory: ./apps/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            ./apps/backend/dist/
+            ./apps/frontend/dist/
+          retention-days: 7
+
+  coverage-report:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download backend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-coverage
+          path: ./backend-coverage/
+
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-coverage
+          path: ./frontend-coverage/
+
+      - name: Combine coverage reports
+        run: |
+          echo "## 測試覆蓋率報告" > coverage-summary.md
+          echo "" >> coverage-summary.md
+          
+          if [ -f "./backend-coverage/lcov-report/index.html" ]; then
+            echo "### Backend Coverage" >> coverage-summary.md
+            echo "Backend coverage report generated successfully" >> coverage-summary.md
+            echo "" >> coverage-summary.md
+          fi
+          
+          if [ -f "./frontend-coverage/lcov-report/index.html" ]; then
+            echo "### Frontend Coverage" >> coverage-summary.md
+            echo "Frontend coverage report generated successfully" >> coverage-summary.md
+            echo "" >> coverage-summary.md
+          fi
+
+      - name: Upload combined coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined-coverage
+          path: |
+            ./backend-coverage/
+            ./frontend-coverage/
+            ./coverage-summary.md
+          retention-days: 30

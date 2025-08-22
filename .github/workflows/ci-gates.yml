@@ -1,0 +1,71 @@
+name: CI Gates
+
+on:
+  push:
+    branches: [ main, staging, refactor/ts-align ]
+  pull_request:
+    branches: [ main, staging ]
+
+jobs:
+  quick-acceptance:
+    name: "Gate A: Quick Acceptance (transpile-only + e2e)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Start services (transpile-only)
+        run: |
+          docker compose --profile local up -d
+          sleep 30
+      
+      - name: Run E2E tests
+        run: |
+          curl -f http://localhost:8080/api/v1/health
+          curl -f http://localhost:3000
+      
+      - name: Cleanup
+        run: docker compose --profile local down
+
+  strict-typescript:
+    name: "Gate B: Strict TypeScript (strict build + enums check)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Check shared enums consistency
+        run: ./scripts/check-enums.sh
+      
+      - name: Strict TypeScript build
+        run: |
+          cd apps/backend
+          npm run build
+          
+      - name: Generate Swagger docs
+        env:
+          ENABLE_SWAGGER: true
+        run: |
+          cd apps/backend
+          npm run swagger:generate || true
+      
+      - name: Frontend build
+        run: |
+          cd apps/frontend  
+          npm run build
